@@ -72,16 +72,6 @@ The three Python scripts expect to live in the **same directory** on `PATH` (the
 
 Run **`gpu_whereami`** in two contexts (e.g. plain `ssh` to the node and inside `srun` / `gpu_join`) and compare the **`pci.bus_id`** column. Same bus id is the same physical card. See **`docs/TOOLKIT.md`**.
 
-## Push to your remote
-
-After clone, set the remote and push (replace URL and branch as needed):
-
-```bash
-cd ~/dsai-slurm-toolkit
-git remote add origin https://github.com/YOU/dsai-slurm-toolkit.git
-git branch -M main
-git push -u origin main
-```
 
 If you created the repo locally with `git init` only, add `origin` as above, then `git push`.
 
