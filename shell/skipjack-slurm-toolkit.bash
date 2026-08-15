@@ -1,17 +1,15 @@
 # ==============================
-# DSAI SLURM SHORTCUT TOOLKIT
+# SKIPJACK SLURM SHORTCUT TOOLKIT
 # ==============================
 
 # ---- Site configuration ----
-# GPU partitions this toolkit reports on. Override in ~/.bashrc before sourcing.
+# Legacy DSAI_* names are still honoured so existing ~/.bashrc exports keep working.
+: "${SKIPJACK_GPU_PARTITIONS:=${DSAI_GPU_PARTITIONS:-a100,l40s,h100,h200,b200,b300}}"
+: "${SKIPJACK_CPU_PARTITION:=${DSAI_CPU_PARTITION:-med}}"
+: "${SKIPJACK_COMPUTE_HOST_RE:=${DSAI_COMPUTE_HOST_RE:-^(csr|ga|gb|gh|gl)[0-9]+$}}"
 # Python helpers read the comma form; bash loops read the space form.
-: "${DSAI_GPU_PARTITIONS:=a100,l40s,h100,h200,b200,b300}"
-export DSAI_GPU_PARTITIONS
-DSAI_GPU_PARTS_SP="${DSAI_GPU_PARTITIONS//,/ }"
-# CPU-only partition used by salloc-cpu / srun-cpu.
-: "${DSAI_CPU_PARTITION:=med}"
-# Hostname regex for "this is a compute node, not the login node" (gpu_join guard).
-: "${DSAI_COMPUTE_HOST_RE:=^(csr|ga|gb|gh|gl)[0-9]+$}"
+export SKIPJACK_GPU_PARTITIONS
+SKIPJACK_GPU_PARTS_SP="${SKIPJACK_GPU_PARTITIONS//,/ }"
 
 # ---- Cluster overview ----
 alias sinfo-gpu='sinfo -o "%P %.6D %.10t %.10l %.6c %.10m"'
@@ -30,8 +28,8 @@ alias cluster='echo "=== PARTITIONS ===" && sinfo -s && echo "" && echo "=== GPU
 # count and --mem=64G silently inflates your core request. These aliases use explicit
 # --mem-per-cpu at (or under) each partition's cap instead: ~64G, predictable core count.
 #   med 4000M/cpu | a100,l40s 6000M/cpu | h100,h200,b200,b300 12000M/cpu
-alias salloc-cpu='salloc --partition=${DSAI_CPU_PARTITION} --cpus-per-task=8 --mem-per-cpu=4000M --time=02:00:00'
-alias srun-cpu='env -u SLURM_JOB_ID srun --partition=${DSAI_CPU_PARTITION} --cpus-per-task=8 --mem-per-cpu=4000M --time=02:00:00 --pty bash -l'
+alias salloc-cpu='salloc --partition=${SKIPJACK_CPU_PARTITION} --cpus-per-task=8 --mem-per-cpu=4000M --time=02:00:00'
+alias srun-cpu='env -u SLURM_JOB_ID srun --partition=${SKIPJACK_CPU_PARTITION} --cpus-per-task=8 --mem-per-cpu=4000M --time=02:00:00 --pty bash -l'
 # GPU: srun --pty = real job step (CUDA_VISIBLE_DEVICES). First line "queued and waiting" is normal until the scheduler finds a node; see myjobs-reason in another terminal.
 # Optional: fail fast if nothing starts in 10m — srun-l40s-try (below).
 alias srun-a100='env -u SLURM_JOB_ID srun --partition=a100 --gres=gpu:1 --cpus-per-task=11 --mem-per-cpu=6000M --time=02:00:00 --pty bash -l'
@@ -49,7 +47,7 @@ alias sbatch-run='sbatch job.slurm'
 # Full Slurm record for one node (CPU count, RealMemory, Gres, features, etc.)
 node_show() {
 	if [ -z "${1:-}" ]; then
-		echo "usage: node_show <nodename>   example: node_show cpu007" >&2
+		echo "usage: node_show <nodename>   example: node_show csr048" >&2
 		return 1
 	fi
 	scontrol show node "$1"
@@ -89,7 +87,7 @@ Interactive shell with binding (from dsailogin, not plain ssh to the node):
   srun --jobid=$SLURM_JOB_ID --nodes=1 --ntasks=1 --overlap --cpu-bind=none --pty /bin/bash
 
 Another Mac tab: SSH to dsailogin (not to the compute node), then:  gpu_join JOBID
-  (JOBID from myjobs — same allocation; gpu_join will refuse if you run it from plain ssh on c*/l*/h*/n*/cpu*.)
+  (JOBID from myjobs — same allocation; gpu_join will refuse if you run it from plain ssh on csr*/ga*/gb*/gh*/gl*.)
 EOS
 	fi
 	if [ "$set" -eq 1 ]; then
@@ -108,7 +106,7 @@ gpu_join() {
 		return 1
 	fi
 	hn=$(hostname -s 2>/dev/null || hostname)
-	if [[ -z "${GPU_JOIN_ANYWHERE:-}" ]] && [[ "$hn" =~ $DSAI_COMPUTE_HOST_RE ]]; then
+	if [[ -z "${GPU_JOIN_ANYWHERE:-}" ]] && [[ "$hn" =~ $SKIPJACK_COMPUTE_HOST_RE ]]; then
 		echo "gpu_join: run from the login node, not from plain ssh to compute node '$hn'." >&2
 		echo "  Exit ssh, connect to the login node, then:  gpu_join $jid" >&2
 		echo "  (Override: GPU_JOIN_ANYWHERE=1 gpu_join $jid  — may still fail with execve on some sites.)" >&2
@@ -173,25 +171,25 @@ EOS
 alias smi-mine='smi_mine'
 
 # ---- Utilities ----
-dsai_aliases_help() {
+skipjack_aliases_help() {
 	cat <<'EOF'
-DSAI SLURM toolkit — what each alias does
+Skipjack Slurm toolkit — what each alias does
 ------------------------------------------
 sinfo-gpu    Partition table: CPUs, memory, time limits (custom sinfo columns).
 nodes        One line per node: name, partition, state, GRES (GPUs).
 nodes-hw     Per-node CPUs, memory (MB), GRES/GPUs, state, partition.
-node_show    Full detail for one node: node_show cpu007 (uses scontrol).
+node_show    Full detail for one node: node_show csr048 (uses scontrol).
 
 myjobs       Your jobs only (squeue -u $USER). Full queue: run squeue.
 myjobs-reason  Your jobs with PD reason column (Resources, Priority, …) while srun waits.
 mygpus       Prints CUDA_VISIBLE_DEVICES etc. inside a Slurm **step** (srun/sbatch). Plain ssh to a node has no binding; use srun --jobid=\$SLURM_JOB_ID --overlap …
 gpu_whereami  pci.bus_id CSV for GPUs visible in **this** shell. Run it on **plain ssh** and again inside **srun/gpu_join**; matching pci.bus_id = same physical GPU.
 smi-mine     If CUDA_VISIBLE_DEVICES is set: nvidia-smi -i … only. Plain ssh usually has no var — use srun/gpu_join or export manually (filter only, not isolation).
-gpu_join     From **dsailogin only** (refuses plain ssh c*/l*/h*/n*/cpu*). --pty /bin/bash, --cpu-bind=none; no --chdir unless GPU_JOIN_CHDIR=1. Overrides: GPU_JOIN_ANYWHERE=1.
+gpu_join     From **dsailogin only** (refuses plain ssh csr*/ga*/gb*/gh*/gl*). --pty /bin/bash, --cpu-bind=none; no --chdir unless GPU_JOIN_CHDIR=1. Overrides: GPU_JOIN_ANYWHERE=1.
 
 cluster      Prints partition summary (sinfo -s) then GPU-style partition lines (includes GPU partitions).
 
-salloc-cpu   Interactive CPU allocation: partition=$DSAI_CPU_PARTITION (med), 8 cores, ~31G, 2h.
+salloc-cpu   Interactive CPU allocation: partition=$SKIPJACK_CPU_PARTITION (med), 8 cores, ~31G, 2h.
 srun-cpu     Same but drops you straight into a shell (srun --pty).
 srun-a100    Interactive GPU shell on a100 (srun --pty); 1 GPU, 11 cores, ~64G, 2h; clears stale SLURM_JOB_ID on login.
 srun-l40s    Same on l40s. srun-h100 / srun-h200 for other GPU partitions.
@@ -210,11 +208,11 @@ gpu-nodes-cap  Per node: T_GPU/U_GPU/F_GPU from scontrol TRES + memory GiB; DRAI
 gpu-queue    Running + pending GPU jobs as fixed-width table (full TRES; no duplicate NODELIST column on running rows).
 gpu-users-gres Sum of visible gres/gpu per user (running / pending); omits squeue N/A lines.
 gpu-report   Runs gpu-nodes-cap, gpu-queue, and gpu-users-gres in one go.
-gpu-allocations  Python: dsai_gpu_allocations.py — Babel-style totals/running/pending/free + optional --nodes / --json (see dsai_gpu_allocations.py -h).
-gpu-counter    Python: dsai_gpu_counter.py — per-model GPU inventory totals (like Babel gpu_counter.py); uses DSAI_GPU_PARTITIONS.
+gpu-allocations  Python: skipjack_gpu_allocations.py — Babel-style totals/running/pending/free + optional --nodes / --json (see skipjack_gpu_allocations.py -h).
+gpu-counter    Python: skipjack_gpu_counter.py — per-model GPU inventory totals (like Babel gpu_counter.py); uses SKIPJACK_GPU_PARTITIONS.
 EOF
 }
-alias aliases-help='dsai_aliases_help'
+alias aliases-help='skipjack_aliases_help'
 alias quotas='quotas.py'
 alias reload='source ~/.bashrc'
 
@@ -247,7 +245,7 @@ _gpu_mem_gib_header() {
 gpu_free_nodes() {
 	local part any
 	_gpu_mem_gib_header
-	for part in $DSAI_GPU_PARTS_SP; do
+	for part in $SKIPJACK_GPU_PARTS_SP; do
 		printf '\n=== %s (state=idle, whole node free) ===\n' "$part"
 		any=0
 		while read -r node p st; do
@@ -256,8 +254,10 @@ gpu_free_nodes() {
 				any=1
 			fi
 		done < <(sinfo -N -p "$part" -t idle -h -o '%N %P %10t' 2>/dev/null | awk '$3 == "idle"' | sort -u)
-		((any == 0)) && echo '(no fully idle nodes)'
+		if ((any == 0)); then echo '(no fully idle nodes)'; fi
 	done
+	# Explicit: the loop's last command is a test, so its status would otherwise leak out.
+	return 0
 }
 alias gpu-free='gpu_free_nodes'
 
@@ -266,7 +266,7 @@ gpu_open_nodes() {
 	local part any
 	_gpu_mem_gib_header
 	printf '%s\n' '(idle = empty node; mix* = partly used — Slurm may still place a GPU; not guaranteed.)'
-	for part in $DSAI_GPU_PARTS_SP; do
+	for part in $SKIPJACK_GPU_PARTS_SP; do
 		printf '\n=== %s (idle or mixed) ===\n' "$part"
 		any=0
 		while read -r node p st; do
@@ -275,8 +275,10 @@ gpu_open_nodes() {
 				any=1
 			fi
 		done < <(sinfo -N -p "$part" -h -o '%N %P %10t' 2>/dev/null | awk '$3 == "idle" || $3 ~ /^mix/' | sort -u)
-		((any == 0)) && echo '(no idle or mixed nodes)'
+		if ((any == 0)); then echo '(no idle or mixed nodes)'; fi
 	done
+	# Explicit: the loop's last command is a test, so its status would otherwise leak out.
+	return 0
 }
 alias gpu-open='gpu_open_nodes'
 
@@ -315,13 +317,13 @@ gpu_nodes_cap() {
 		totg=$(awk -v m="$real" 'BEGIN { printf "%.1f", m / 1024 }')
 		jfg=$(awk -v m="$unbook" 'BEGIN { printf "%.1f", m / 1024 }')
 		printf '%-8s %-8s %-8s %5s %5s %5s %9s %9s\n' "$node" "$part" "$st" "$cfg_g" "$a_g" "$free" "$totg" "$jfg"
-	done < <(sinfo -N -p "$DSAI_GPU_PARTITIONS" -h -o '%N %P %t' 2>/dev/null | sort -u -k1,1 -k2,2)
+	done < <(sinfo -N -p "$SKIPJACK_GPU_PARTITIONS" -h -o '%N %P %t' 2>/dev/null | sort -u -k1,1 -k2,2)
 }
 alias gpu-nodes-cap='gpu_nodes_cap'
 
 # squeue -o with tiny %b was truncating gres (e.g. gres/gpu:a100:10). Pipe-delimited + awk fixed widths.
 _gpu_queue_fmt_run() {
-	squeue -t R -p "$DSAI_GPU_PARTITIONS" -h -o '%u|%i|%t|%P|%b|%M|%l|%D|%N' 2>/dev/null | awk -F'|' '
+	squeue -t R -p "$SKIPJACK_GPU_PARTITIONS" -h -o '%u|%i|%t|%P|%b|%M|%l|%D|%N' 2>/dev/null | awk -F'|' '
 	function rule() {
 		for (r = 0; r < 136; r++) printf "-"
 		printf "\n"
@@ -339,7 +341,7 @@ _gpu_queue_fmt_run() {
 	}'
 }
 _gpu_queue_fmt_pd() {
-	squeue -t PD -p "$DSAI_GPU_PARTITIONS" -h -o '%u|%i|%t|%P|%b|%M|%l|%D|%R' 2>/dev/null | awk -F'|' '
+	squeue -t PD -p "$SKIPJACK_GPU_PARTITIONS" -h -o '%u|%i|%t|%P|%b|%M|%l|%D|%R' 2>/dev/null | awk -F'|' '
 	function rule() {
 		for (r = 0; r < 136; r++) printf "-"
 		printf "\n"
@@ -358,7 +360,7 @@ _gpu_queue_fmt_pd() {
 }
 
 gpu_queue_report() {
-	printf '\n%s\n' "=== RUNNING (GPU partitions $DSAI_GPU_PARTITIONS) ==="
+	printf '\n%s\n' "=== RUNNING (GPU partitions $SKIPJACK_GPU_PARTITIONS) ==="
 	_gpu_queue_fmt_run | head -350
 	printf '\n%s\n' '=== PENDING (same partitions) ==='
 	_gpu_queue_fmt_pd | head -500
@@ -388,7 +390,7 @@ gpu_users_gres_report() {
 		else
 			rna[$u]=$((${rna[$u]:-0} + 1))
 		fi
-	done < <(squeue -t R -p "$DSAI_GPU_PARTITIONS" -h -o '%u %b' 2>/dev/null)
+	done < <(squeue -t R -p "$SKIPJACK_GPU_PARTITIONS" -h -o '%u %b' 2>/dev/null)
 	while read -r u b; do
 		[[ -z "${u:-}" ]] && continue
 		n=$(_gpu_parse_job_gres "${b:-N/A}")
@@ -397,7 +399,7 @@ gpu_users_gres_report() {
 		else
 			pna[$u]=$((${pna[$u]:-0} + 1))
 		fi
-	done < <(squeue -t PD -p "$DSAI_GPU_PARTITIONS" -h -o '%u %b' 2>/dev/null)
+	done < <(squeue -t PD -p "$SKIPJACK_GPU_PARTITIONS" -h -o '%u %b' 2>/dev/null)
 	printf '\n%s\n' '=== SUM gres/gpu (from squeue %b; N/A not counted) ==='
 	printf '%-12s %10s %10s %10s %10s\n' USER RUN_GRES PD_GRES RUN_NA PD_NA
 	for u in $(printf '%s\n' "${!rsum[@]}" "${!psum[@]}" "${!rna[@]}" "${!pna[@]}" | sort -u); do
@@ -413,8 +415,8 @@ gpu_report_all() {
 	gpu_users_gres_report
 }
 alias gpu-report='gpu_report_all'
-alias gpu-allocations='dsai_gpu_allocations.py'
-alias gpu-counter='dsai_gpu_counter.py'
+alias gpu-allocations='skipjack_gpu_allocations.py'
+alias gpu-counter='skipjack_gpu_counter.py'
 
 # ==============================
 # END TOOLKIT

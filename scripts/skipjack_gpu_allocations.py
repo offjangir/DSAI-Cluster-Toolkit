@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-DSAI Slurm GPU allocation summary (CMU Babel gpu_allocations.py style).
+Skipjack Slurm GPU allocation summary (CMU Babel gpu_allocations.py style).
 
-Uses the same GPU partition list as dsai_gpu.py (DSAI_GPU_PARTITIONS / defaults).
+Uses the same GPU partition list as skipjack_gpu.py (SKIPJACK_GPU_PARTITIONS / defaults).
 Requires Slurm: sinfo, scontrol, squeue.
 
 Running / Free / Util% use per-node AllocTRES vs Gres= inventory (not squeue %b),
@@ -26,7 +26,7 @@ _SCRIPT_DIR = str(Path(__file__).resolve().parent)
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
-import dsai_gpu as dg  # noqa: E402
+import skipjack_gpu as dg  # noqa: E402
 
 
 def parse_gres_inventory(gres_blob: str) -> Dict[str, int]:
@@ -427,14 +427,14 @@ def print_json(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Show GPU status in Slurm (DSAI-style; Babel gpu_allocations.py analog).",
+        description="Show GPU status in Slurm (Skipjack-style; Babel gpu_allocations.py analog).",
         epilog="""Examples:
-  dsai_gpu_allocations.py                     # Table only
-  dsai_gpu_allocations.py --nodes             # Table + free nodes
-  dsai_gpu_allocations.py -f                  # Free nodes only
-  dsai_gpu_allocations.py -f --model h100    # Free H100-class nodes only
-  dsai_gpu_allocations.py --json              # Full table as JSON
-  dsai_gpu_allocations.py -f --json           # Free nodes JSON only
+  skipjack_gpu_allocations.py                     # Table only
+  skipjack_gpu_allocations.py --nodes             # Table + free nodes
+  skipjack_gpu_allocations.py -f                  # Free nodes only
+  skipjack_gpu_allocations.py -f --model h100    # Free H100-class nodes only
+  skipjack_gpu_allocations.py --json              # Full table as JSON
+  skipjack_gpu_allocations.py -f --json           # Free nodes JSON only
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

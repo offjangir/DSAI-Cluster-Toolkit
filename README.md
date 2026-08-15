@@ -1,6 +1,6 @@
-# DSAI Slurm toolkit
+# Skipjack cluster setup
 
-Bash aliases, functions, and Python helpers for **Slurm + GPU** workflows on **JHU-style DSAI** login nodes. Defaults target partitions `med`, `a100`, `l40s`, `h100`, `h200`, `b200`, `b300`; every site-specific name is a shell variable (see [Environment](#environment)), so adjust there rather than editing functions.
+Bash aliases, functions, and Python helpers for **Slurm + GPU** workflows on **Skipjack**, the JHU ARCH DSAI cluster (login node `login01`, reached as `dsailogin.arch.jhu.edu`). Defaults target partitions `med`, `a100`, `l40s`, `h100`, `h200`, `b200`, `b300`; every site-specific name is a shell variable (see [Environment](#environment)), so adjust there rather than editing functions.
 
 Getting *onto* the cluster in the first place is a separate problem — see
 **[`docs/ARCH-SSH.md`](docs/ARCH-SSH.md)** for authenticating once per day instead of
@@ -10,10 +10,10 @@ once per connection.
 
 | Path | Purpose |
 |------|---------|
-| [`shell/dsai-slurm-toolkit.bash`](shell/dsai-slurm-toolkit.bash) | Full toolkit block: aliases, `gpu_join`, `mygpus`, `gpu_whereami`, queue reports, etc. |
-| [`scripts/dsai_gpu.py`](scripts/dsai_gpu.py) | CLI: `summary`, `queue`, `by-user`, `by-type`, `nodes-cap`, `report`, … |
-| [`scripts/dsai_gpu_allocations.py`](scripts/dsai_gpu_allocations.py) | Babel-style GPU totals / running / pending / free (`--nodes`, `--json`, …). |
-| [`scripts/dsai_gpu_counter.py`](scripts/dsai_gpu_counter.py) | Per-model GPU inventory counts. |
+| [`shell/skipjack-slurm-toolkit.bash`](shell/skipjack-slurm-toolkit.bash) | Full toolkit block: aliases, `gpu_join`, `mygpus`, `gpu_whereami`, queue reports, etc. |
+| [`scripts/skipjack_gpu.py`](scripts/skipjack_gpu.py) | CLI: `summary`, `queue`, `by-user`, `by-type`, `nodes-cap`, `report`, … |
+| [`scripts/skipjack_gpu_allocations.py`](scripts/skipjack_gpu_allocations.py) | Babel-style GPU totals / running / pending / free (`--nodes`, `--json`, …). |
+| [`scripts/skipjack_gpu_counter.py`](scripts/skipjack_gpu_counter.py) | Per-model GPU inventory counts. |
 | [`docs/TOOLKIT.md`](docs/TOOLKIT.md) | Longer documentation (design notes, tables, troubleshooting). |
 | [`docs/ARCH-SSH.md`](docs/ARCH-SSH.md) | **Local machine:** one-login SSH to `login.arch.jhu.edu` via `ControlMaster`, plus the Cursor/VS Code remote setup. |
 
@@ -24,15 +24,20 @@ The three Python scripts expect to live in the **same directory** on `PATH` (the
 1. **Clone** (or copy) this repository to the machine where you use Slurm (e.g. under your home directory).
 
    ```bash
-   git clone https://github.com/offjangir/DSAI-Cluster-Toolkit.git ~/DSAI-Cluster-Toolkit
-   cd ~/DSAI-Cluster-Toolkit
+   git clone https://github.com/offjangir/DSAI-Cluster-Toolkit.git ~/Skipjack-Cluster-Setup
+   cd ~/Skipjack-Cluster-Setup
    ```
+
+   > The GitHub repository is still named `DSAI-Cluster-Toolkit`; only the project
+   > contents were renamed to Skipjack. If the repo is renamed later, GitHub will
+   > redirect the old URL, but update your remote with
+   > `git remote set-url origin <new-url>`.
 
 2. **Put scripts on `PATH`** (pick one):
 
    ```bash
    cp scripts/*.py ~/bin/
-   chmod +x ~/bin/dsai_gpu.py ~/bin/dsai_gpu_allocations.py ~/bin/dsai_gpu_counter.py
+   chmod +x ~/bin/skipjack_gpu.py ~/bin/skipjack_gpu_allocations.py ~/bin/skipjack_gpu_counter.py
    ```
 
    Ensure `~/bin` is on `PATH` (common pattern):
@@ -46,16 +51,16 @@ The three Python scripts expect to live in the **same directory** on `PATH` (the
 
    ```bash
    mkdir -p ~/.bashrc.d
-   cat > ~/.bashrc.d/dsai-slurm-toolkit.sh <<'EOF'
-   DSAI_TOOLKIT_DIR="$HOME/DSAI-Cluster-Toolkit"
-   [[ -f "$DSAI_TOOLKIT_DIR/shell/dsai-slurm-toolkit.bash" ]] && . "$DSAI_TOOLKIT_DIR/shell/dsai-slurm-toolkit.bash"
+   cat > ~/.bashrc.d/skipjack-slurm-toolkit.sh <<'EOF'
+   SKIPJACK_TOOLKIT_DIR="$HOME/Skipjack-Cluster-Setup"
+   [[ -f "$SKIPJACK_TOOLKIT_DIR/shell/skipjack-slurm-toolkit.bash" ]] && . "$SKIPJACK_TOOLKIT_DIR/shell/skipjack-slurm-toolkit.bash"
    EOF
    ```
 
    Sourcing from the checkout means `git pull` updates your shell. If your `~/.bashrc` has no
    `~/.bashrc.d` loop, put that same one-liner directly in `~/.bashrc` instead.
 
-   Alternatively, copy the contents of `shell/dsai-slurm-toolkit.bash` between the `# DSAI SLURM SHORTCUT TOOLKIT` markers in your `~/.bashrc` and keep the Python scripts on `PATH` as above.
+   Alternatively, copy the contents of `shell/skipjack-slurm-toolkit.bash` between the `# SKIPJACK SLURM SHORTCUT TOOLKIT` markers in your `~/.bashrc` and keep the Python scripts on `PATH` as above.
 
 4. **Reload** the shell:
 
@@ -67,26 +72,26 @@ The three Python scripts expect to live in the **same directory** on `PATH` (the
 
    ```bash
    aliases-help
-   dsai_gpu.py summary
+   skipjack_gpu.py summary
    gpu-counter
    ```
 
 ## Environment
 
-All three are set at the top of `shell/dsai-slurm-toolkit.bash` and honour a pre-existing
+All three are set at the top of `shell/skipjack-slurm-toolkit.bash` and honour a pre-existing
 value, so you can override them in `~/.bashrc` *before* sourcing the toolkit.
 
-- **`DSAI_GPU_PARTITIONS`** — comma-separated GPU partitions used by both the Python tools
+- **`SKIPJACK_GPU_PARTITIONS`** — comma-separated GPU partitions used by both the Python tools
   and the bash report functions (`gpu-free`, `gpu-open`, `gpu-nodes-cap`, `gpu-queue`,
   `gpu-users-gres`). Default: `a100,l40s,h100,h200,b200,b300`.
 
   ```bash
-  export DSAI_GPU_PARTITIONS=a100,l40s,h100,h200,b200,b300
+  export SKIPJACK_GPU_PARTITIONS=a100,l40s,h100,h200,b200,b300
   ```
 
-- **`DSAI_CPU_PARTITION`** — CPU-only partition for `salloc-cpu` / `srun-cpu`. Default: `med`.
+- **`SKIPJACK_CPU_PARTITION`** — CPU-only partition for `salloc-cpu` / `srun-cpu`. Default: `med`.
 
-- **`DSAI_COMPUTE_HOST_RE`** — regex identifying compute nodes, so `gpu_join` can refuse to
+- **`SKIPJACK_COMPUTE_HOST_RE`** — regex identifying compute nodes, so `gpu_join` can refuse to
   run from a plain `ssh` session. Default: `^(csr|ga|gb|gh|gl)[0-9]+$`.
 
 ### Memory is welded to core count

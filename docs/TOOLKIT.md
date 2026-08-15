@@ -1,8 +1,8 @@
-# DSAI Slurm shell toolkit
+# Skipjack Slurm shell toolkit
 
-This file ships with the **[dsai-slurm-toolkit](../README.md)** repository. The shell definitions live in [`shell/dsai-slurm-toolkit.bash`](../shell/dsai-slurm-toolkit.bash); install by sourcing that file from `~/.bashrc` (see the repo **README**).
+This file ships with the **[skipjack-slurm-toolkit](../README.md)** repository. The shell definitions live in [`shell/skipjack-slurm-toolkit.bash`](../shell/skipjack-slurm-toolkit.bash); install by sourcing that file from `~/.bashrc` (see the repo **README**).
 
-The following describes the **Slurm shortcuts and helper functions** (historically pasted under **“DSAI SLURM SHORTCUT TOOLKIT”** in `~/.bashrc`). They are tailored for the **DSAI** login / GPU partitions (`a100`, `l40s`, `h100`, `nvl`, `cpu`) at JHU-style clusters; partition names or limits may differ elsewhere.
+The following describes the **Slurm shortcuts and helper functions** (historically pasted under **“SKIPJACK SLURM SHORTCUT TOOLKIT”** in `~/.bashrc`). They are tailored for the **Skipjack** login node: GPU partitions `a100`, `l40s`, `h100`, `h200`, `b200`, `b300` and the CPU partition `med`. Partition names are **not** hard-coded — see `SKIPJACK_GPU_PARTITIONS` / `SKIPJACK_CPU_PARTITION` in the [README](../README.md#environment).
 
 ## Activating and help
 
@@ -39,7 +39,7 @@ The following describes the **Slurm shortcuts and helper functions** (historical
    In an `srun` step, **`nvidia-smi` “GPU 0”** is often **only your view**, not “socket GPU 0 on the whole node.” Run **`gpu_whereami`** in **two** shells (e.g. plain **`ssh` to the node** and again inside **`srun` / `gpu_join`** on the same node) and **match `pci.bus_id`** — the same bus id is the same physical card in both views.
 
 6. **Plain SSH and “only my GPUs”**  
-   On DSAI, **plain `ssh` to a GPU node** often shows **all** GPUs; that is controlled by **admins** (cgroup / PAM / `pam_slurm_adopt`, etc.), not by your `~/.bashrc`.  
+   On Skipjack, **plain `ssh` to a GPU node** often shows **all** GPUs; that is controlled by **admins** (cgroup / PAM / `pam_slurm_adopt`, etc.), not by your `~/.bashrc`.  
    User-side partial workaround: if you **`export CUDA_VISIBLE_DEVICES=…`** (e.g. copy from a step where **`mygpus`** printed it), **`smi-mine`** runs **`nvidia-smi -i …`** so the **listing** is filtered. That does **not** add kernel-level device isolation.
 
 ---
@@ -48,11 +48,11 @@ The following describes the **Slurm shortcuts and helper functions** (historical
 
 | Goal | Command |
 |------|---------|
-| Interactive **A100**, 1 GPU, 64G, 2h | `srun-a100` |
+| Interactive **A100**, 1 GPU, 11 cores, ~64G, 2h | `srun-a100` |
 | Interactive **L40S** | `srun-l40s` |
 | Same, but exit if not started in **10 min** | `srun-l40s-try` |
-| Interactive **H100** / **nvl** | `srun-h100` / `srun-nvl` |
-| **CPU** interactive (no GPU) | `salloc-cpu` |
+| Interactive **H100** / **H200** | `srun-h100` / `srun-h200` |
+| **CPU** interactive (no GPU), partition `med` | `salloc-cpu` (reservation) / `srun-cpu` (shell) |
 | Reserve GPU only (`salloc`), then steps | `salloc-gpu-a100` / `salloc-gpu-l40s`, then `gpu_join <JOBID>` or manual `srun --jobid=… --overlap …` |
 | Submit default script | `sbatch-run` (expects `job.slurm`) |
 
@@ -80,7 +80,7 @@ These commands call **`scontrol show node`** where noted; they are **hints**, no
 
 | Command | Purpose |
 |---------|---------|
-| `gpu-free` | Per partition (`a100`, `l40s`, `h100`, `nvl`): nodes with Slurm state **`idle`** only, with **TOT_GiB**, **JOBFREE_GiB** (RealMemory−AllocMem), **OSFREE_GiB**, GRES. |
+| `gpu-free` | Per partition in `$SKIPJACK_GPU_PARTITIONS`: nodes with Slurm state **`idle`** only, with **TOT_GiB**, **JOBFREE_GiB** (RealMemory−AllocMem), **OSFREE_GiB**, GRES. |
 | `gpu-open` | Same layout for **`idle` or `mixed`** nodes (often where shared-node GPU jobs land). |
 | `gpu-nodes-cap` | Per node: **T_GPU / U_GPU / F_GPU** from **CfgTRES / AllocTRES** `gres/gpu=`, plus **TOT_GiB** / **JOBFREE_GiB**. Skips obvious bad states (e.g. DRAIN/DOWN). |
 
@@ -99,8 +99,8 @@ These commands call **`scontrol show node`** where noted; they are **hints**, no
 | `gpu-queue` | **Running** then **pending** jobs on GPU partitions, **fixed-width** table; **TRES** from `squeue` is pipe-delimited so long `gres/...` strings are not truncated like narrow `%b` formats. |
 | `gpu-users-gres` | Sums **`gres/gpu:N`** parsed from `squeue` `%b` per user (**running** / **pending**), plus counts of **N/A** lines not included in sums. |
 | `gpu-report` | Runs **`gpu-nodes-cap`**, **`gpu-queue`**, **`gpu-users-gres`** in sequence. |
-| `gpu-allocations` | `dsai_gpu_allocations.py` on **PATH** (`~/bin`): Babel-style totals / running / pending / free (see `dsai_gpu_allocations.py -h`). |
-| `gpu-counter` | `dsai_gpu_counter.py`: per-model GPU inventory totals. |
+| `gpu-allocations` | `skipjack_gpu_allocations.py` on **PATH** (`~/bin`): Babel-style totals / running / pending / free (see `skipjack_gpu_allocations.py -h`). |
+| `gpu-counter` | `skipjack_gpu_counter.py`: per-model GPU inventory totals. |
 
 ---
 
@@ -123,7 +123,7 @@ These commands call **`scontrol show node`** where noted; they are **hints**, no
 |---------|---------|
 | `reload` | `source ~/.bashrc` |
 | `quotas` | Runs `quotas.py` (must be on **PATH**). |
-| `dsai_gpu.py` | Optional CLI (`dsai_gpu.py -h`): `summary`, `queue`, `by-user`, `report`, … (same partition env as above). |
+| `skipjack_gpu.py` | Optional CLI (`skipjack_gpu.py -h`): `summary`, `queue`, `by-user`, `report`, … (same partition env as above). |
 
 ---
 
@@ -141,9 +141,9 @@ These commands call **`scontrol show node`** where noted; they are **hints**, no
 
 ## Editing and scope
 
-- In this repo, edit **`shell/dsai-slurm-toolkit.bash`** (or your copy in **`~/.bashrc`** between **`# DSAI SLURM SHORTCUT TOOLKIT`** and **`# END TOOLKIT`**).
-- **Partition lists** and **`-p a100,l40s,h100,nvl`** appear in several helpers; if the cluster adds or renames partitions, update those consistently.
-- **Defaults** (e.g. **`--mem=64G`**, **`--time=02:00:00`**, **`--gres=gpu:1`**) match common interactive use; adjust aliases to taste.
+- In this repo, edit **`shell/skipjack-slurm-toolkit.bash`** (or your copy in **`~/.bashrc`** between **`# SKIPJACK SLURM SHORTCUT TOOLKIT`** and **`# END TOOLKIT`**).
+- **Partition lists** now come from **`SKIPJACK_GPU_PARTITIONS`** / **`SKIPJACK_CPU_PARTITION`**, set once at the top of the toolkit; override them in `~/.bashrc` rather than editing individual helpers.
+- **Defaults** (e.g. **`--mem-per-cpu`**, **`--time=02:00:00`**, **`--gres=gpu:1`**) match common interactive use; adjust aliases to taste. Note every partition sets `DefMemPerCPU == MaxMemPerCPU`, so `--mem` inflates the **core** request instead of capping RAM — prefer `--mem-per-cpu`.
 
 ---
 

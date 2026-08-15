@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Report total count of each GPU model on DSAI Slurm GPU partitions.
+Report total count of each GPU model on Skipjack Slurm GPU partitions.
 
 Analog to CMU Babel gpu_counter.py: inventory from node Gres= (via
-scontrol), scoped to DSAI_GPU_PARTITIONS (default a100,l40s,h100,nvl).
+scontrol), scoped to SKIPJACK_GPU_PARTITIONS (default a100,l40s,h100,h200,b200,b300).
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ _SCRIPT_DIR = str(Path(__file__).resolve().parent)
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
-import dsai_gpu as dg  # noqa: E402
-from dsai_gpu_allocations import (  # noqa: E402
+import skipjack_gpu as dg  # noqa: E402
+from skipjack_gpu_allocations import (  # noqa: E402
     get_cluster_data,
     parse_gres_inventory,
     pretty_model,
@@ -59,13 +59,13 @@ def get_gpu_counts(partitions: str) -> Dict[str, int]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Total GPUs per model (DSAI GPU partitions; Babel gpu_counter.py style)."
+        description="Total GPUs per model (Skipjack GPU partitions; Babel gpu_counter.py style)."
     )
     ap.add_argument(
         "-v",
         "--verbose",
         action="store_true",
-        help="Log Slurm helper commands (via dsai_gpu).",
+        help="Log Slurm helper commands (via skipjack_gpu).",
     )
     args = ap.parse_args()
     dg.FLAG["verbose"] = bool(args.verbose)

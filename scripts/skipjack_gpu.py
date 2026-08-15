@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-DSAI Slurm GPU cluster view (JHU dsailogin-style partitions).
+Skipjack Slurm GPU cluster view (JHU ARCH dsailogin partitions).
 
 Inspired by CMU Babel tir_tool/gpu.py: parse Slurm GRES/TRES, summarize
-queues and capacity. Defaults to GPU partitions a100,l40s,h100,nvl.
+queues and capacity. Defaults to GPU partitions a100,l40s,h100,h200,b200,b300.
 
 Environment:
-  DSAI_GPU_PARTITIONS   Override comma-separated partition list (default below).
+  SKIPJACK_GPU_PARTITIONS   Override comma-separated partition list (default below).
 """
 
 from __future__ import annotations
@@ -23,12 +23,20 @@ from typing import Any, DefaultDict, Dict, Iterable, List, Tuple
 # Some Slurm sites omit parentheses in %R; include both shapes.
 PENDING_REASONS = ("(Resources)", "(Priority)", "Resources", "Priority")
 
-DEFAULT_PARTITIONS = "a100,l40s,h100,nvl"
+DEFAULT_PARTITIONS = "a100,l40s,h100,h200,b200,b300"
 FLAG: Dict[str, Any] = {"verbose": False}
+
+# SKIPJACK_GPU_PARTITIONS is the current name; DSAI_GPU_PARTITIONS is still honoured so
+# existing ~/.bashrc exports keep working after the rename.
+PARTITION_ENV_VARS = ("SKIPJACK_GPU_PARTITIONS", "DSAI_GPU_PARTITIONS")
 
 
 def partitions_csv() -> str:
-    return os.environ.get("DSAI_GPU_PARTITIONS", DEFAULT_PARTITIONS).strip() or DEFAULT_PARTITIONS
+    for var in PARTITION_ENV_VARS:
+        val = os.environ.get(var, "").strip()
+        if val:
+            return val
+    return DEFAULT_PARTITIONS
 
 
 def run_cmd(argv: List[str], *, shell: bool = False) -> str:
@@ -363,7 +371,7 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="DSAI Slurm GPU reports (dsailogin-style).")
+    ap = argparse.ArgumentParser(description="Skipjack Slurm GPU reports (JHU ARCH).")
     ap.add_argument(
         "-v",
         "--verbose",
