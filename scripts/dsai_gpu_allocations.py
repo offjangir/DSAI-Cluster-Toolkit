@@ -4,6 +4,10 @@ DSAI Slurm GPU allocation summary (CMU Babel gpu_allocations.py style).
 
 Uses the same GPU partition list as dsai_gpu.py (DSAI_GPU_PARTITIONS / defaults).
 Requires Slurm: sinfo, scontrol, squeue.
+
+Running / Free / Util% use per-node AllocTRES vs Gres= inventory (not squeue %b),
+so generic job GRES still shows up on the right hardware row. Pending still comes
+from squeue TRES (may under-split by model if jobs omit gpu:TYPE).
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import DefaultDict, Dict, List, Optional, Set
+from typing import DefaultDict, Dict, List, Optional, Set, Tuple
 
 # Reuse Slurm helpers from sibling script (same directory on PATH).
 _SCRIPT_DIR = str(Path(__file__).resolve().parent)
@@ -43,15 +47,32 @@ def parse_gres_inventory(gres_blob: str) -> Dict[str, int]:
 
 
 def tres_gpu_numeric(tres: str) -> int:
+    """
+    Total GPUs from a Slurm TRES blob (CfgTRES / AllocTRES).
+
+    Slurm often emits both ``gres/gpu=N`` (total) and ``gres/gpu:type=N`` (same
+    GPUs); summing those double-counts. Prefer the generic total when present,
+    otherwise sum per-type segments (multi-GPU-type nodes).
+    """
     if not tres:
         return 0
+    generic = 0
+    typed_sum = 0
     for seg in tres.split(","):
         seg = seg.strip()
-        if seg.startswith("gres/gpu="):
-            tail = seg.split("=", 1)[1]
-            if tail.isdigit():
-                return int(tail)
-    return 0
+        if not seg.lower().startswith("gres/gpu"):
+            continue
+        m = re.match(r"gres/gpu=(\d+)$", seg, re.I)
+        if m:
+            generic = max(generic, int(m.group(1)))
+            continue
+        m = re.match(r"gres/gpu:[A-Za-z0-9_.-]+=(\d+)$", seg, re.I)
+        if m:
+            typed_sum += int(m.group(1))
+            continue
+    if generic > 0:
+        return generic
+    return typed_sum
 
 
 def node_is_unavailable(state: str) -> bool:
@@ -134,14 +155,32 @@ def unique_gpu_nodes(partitions: str) -> List[str]:
 def fetch_node_infos(nodes: List[str]) -> List[Dict[str, object]]:
     infos: List[Dict[str, object]] = []
     batch_size = 20
+    empty_batches = 0
     for i in range(0, len(nodes), batch_size):
         batch = nodes[i : i + batch_size]
         arg = ",".join(batch)
         raw = dg.run_cmd(["scontrol", "show", "node", arg], shell=False)
+        if not raw.strip():
+            empty_batches += 1
+            continue
         for rec in split_node_records(raw):
             parsed = parse_node_record(rec)
             if parsed:
                 infos.append(parsed)
+    if nodes and not infos:
+        print(
+            "WARNING: scontrol returned no node data — totals will be 0. "
+            "Try `scontrol show node " + nodes[0] + "` directly; on this host, "
+            "scontrol fails to load libreadline.so.7 unless ~/lib/slurm-compat "
+            "is on LD_LIBRARY_PATH.",
+            file=sys.stderr,
+        )
+    elif empty_batches:
+        print(
+            f"WARNING: {empty_batches} scontrol batch(es) returned empty; "
+            "some nodes missing from totals. Re-run with -v to see Slurm errors.",
+            file=sys.stderr,
+        )
     return infos
 
 
@@ -181,6 +220,45 @@ def aggregate_job_gpus(partitions: str, state: str) -> DefaultDict[str, int]:
 
 def get_running(partitions: str) -> DefaultDict[str, int]:
     return aggregate_job_gpus(partitions, "R")
+
+
+def aggregate_allocated_gpus_by_model(
+    infos: List[Dict[str, object]],
+) -> Dict[str, int]:
+    """
+    Sum GPUs in use from Slurm node AllocTRES, attributed to Gres= model keys.
+
+    Matches cfg - alloc used in --nodes; avoids under-counting when running jobs
+    report gres/gpu:N without a type in squeue %b.
+    """
+    acc: DefaultDict[str, int] = defaultdict(int)
+    for info in infos:
+        if node_is_unavailable(str(info["state"])):
+            continue
+        raw = info.get("by_model")
+        if not isinstance(raw, dict) or not raw:
+            continue
+        by_model: Dict[str, int] = {str(k): int(v) for k, v in raw.items()}
+        alloc_g = int(info["alloc_gpu"] or 0)
+        if alloc_g <= 0:
+            continue
+        if len(by_model) == 1:
+            acc[next(iter(by_model))] += alloc_g
+            continue
+        tot_cfg = sum(by_model.values())
+        if tot_cfg <= 0:
+            acc[primary_model(by_model)] += alloc_g
+            continue
+        assigned = 0
+        items = sorted(by_model.items(), key=lambda kv: (-kv[1], kv[0]))
+        for i, (m, c) in enumerate(items):
+            if i == len(items) - 1:
+                acc[m] += alloc_g - assigned
+            else:
+                take = (alloc_g * c) // tot_cfg
+                acc[m] += take
+                assigned += take
+    return dict(acc)
 
 
 def get_pending(partitions: str) -> DefaultDict[str, int]:
@@ -394,7 +472,7 @@ def main() -> int:
 
     partitions = dg.partitions_csv()
     totals, unavailable, infos = get_cluster_data(partitions)
-    running = get_running(partitions)
+    running = aggregate_allocated_gpus_by_model(infos)
     pending = get_pending(partitions)
     mf: Optional[Set[str]] = None
     if args.model:

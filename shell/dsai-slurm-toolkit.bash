@@ -2,6 +2,17 @@
 # DSAI SLURM SHORTCUT TOOLKIT
 # ==============================
 
+# ---- Site configuration ----
+# GPU partitions this toolkit reports on. Override in ~/.bashrc before sourcing.
+# Python helpers read the comma form; bash loops read the space form.
+: "${DSAI_GPU_PARTITIONS:=a100,l40s,h100,h200,b200,b300}"
+export DSAI_GPU_PARTITIONS
+DSAI_GPU_PARTS_SP="${DSAI_GPU_PARTITIONS//,/ }"
+# CPU-only partition used by salloc-cpu / srun-cpu.
+: "${DSAI_CPU_PARTITION:=med}"
+# Hostname regex for "this is a compute node, not the login node" (gpu_join guard).
+: "${DSAI_COMPUTE_HOST_RE:=^(csr|ga|gb|gh|gl)[0-9]+$}"
+
 # ---- Cluster overview ----
 alias sinfo-gpu='sinfo -o "%P %.6D %.10t %.10l %.6c %.10m"'
 alias nodes='sinfo -N -o "%N %P %t %G"'
@@ -15,17 +26,22 @@ alias myjobs-reason='squeue -u $USER -o "%.18i %.9P %.2t %.10M %R"'
 alias cluster='echo "=== PARTITIONS ===" && sinfo -s && echo "" && echo "=== GPU STATUS ===" && sinfo -o "%P %.6D %.10t %.10l %.6c %.10m"'
 
 # ---- Interactive sessions ----
-alias salloc-cpu='salloc --partition=cpu --time=02:00:00'
+# NOTE: every partition here sets DefMemPerCPU == MaxMemPerCPU, so RAM is welded to core
+# count and --mem=64G silently inflates your core request. These aliases use explicit
+# --mem-per-cpu at (or under) each partition's cap instead: ~64G, predictable core count.
+#   med 4000M/cpu | a100,l40s 6000M/cpu | h100,h200,b200,b300 12000M/cpu
+alias salloc-cpu='salloc --partition=${DSAI_CPU_PARTITION} --cpus-per-task=8 --mem-per-cpu=4000M --time=02:00:00'
+alias srun-cpu='env -u SLURM_JOB_ID srun --partition=${DSAI_CPU_PARTITION} --cpus-per-task=8 --mem-per-cpu=4000M --time=02:00:00 --pty bash -l'
 # GPU: srun --pty = real job step (CUDA_VISIBLE_DEVICES). First line "queued and waiting" is normal until the scheduler finds a node; see myjobs-reason in another terminal.
 # Optional: fail fast if nothing starts in 10m — srun-l40s-try (below).
-alias srun-a100='env -u SLURM_JOB_ID srun --partition=a100 --gres=gpu:1 --mem=64G --time=02:00:00 --pty bash -l'
-alias srun-l40s='env -u SLURM_JOB_ID srun --partition=l40s --gres=gpu:1 --mem=64G --time=02:00:00 --pty bash -l'
-alias srun-l40s-try='env -u SLURM_JOB_ID srun --partition=l40s --gres=gpu:1 --mem=64G --time=02:00:00 --immediate=600 --pty bash -l'
-alias srun-h100='env -u SLURM_JOB_ID srun --partition=h100 --gres=gpu:1 --mem=64G --time=02:00:00 --pty bash -l'
-alias srun-nvl='env -u SLURM_JOB_ID srun --partition=nvl --gres=gpu:1 --mem=64G --time=02:00:00 --pty bash -l'
+alias srun-a100='env -u SLURM_JOB_ID srun --partition=a100 --gres=gpu:1 --cpus-per-task=11 --mem-per-cpu=6000M --time=02:00:00 --pty bash -l'
+alias srun-l40s='env -u SLURM_JOB_ID srun --partition=l40s --gres=gpu:1 --cpus-per-task=11 --mem-per-cpu=6000M --time=02:00:00 --pty bash -l'
+alias srun-l40s-try='env -u SLURM_JOB_ID srun --partition=l40s --gres=gpu:1 --cpus-per-task=11 --mem-per-cpu=6000M --time=02:00:00 --immediate=600 --pty bash -l'
+alias srun-h100='env -u SLURM_JOB_ID srun --partition=h100 --gres=gpu:1 --cpus-per-task=8 --mem-per-cpu=8000M --time=02:00:00 --pty bash -l'
+alias srun-h200='env -u SLURM_JOB_ID srun --partition=h200 --gres=gpu:1 --cpus-per-task=8 --mem-per-cpu=8000M --time=02:00:00 --pty bash -l'
 # Reservation only (no step shell); then: srun --jobid=$SLURM_JOB_ID --overlap --pty bash -l
-alias salloc-gpu-a100='salloc --partition=a100 --gres=gpu:1 --mem=64G --time=02:00:00'
-alias salloc-gpu-l40s='salloc --partition=l40s --gres=gpu:1 --mem=64G --time=02:00:00'
+alias salloc-gpu-a100='salloc --partition=a100 --gres=gpu:1 --cpus-per-task=11 --mem-per-cpu=6000M --time=02:00:00'
+alias salloc-gpu-l40s='salloc --partition=l40s --gres=gpu:1 --cpus-per-task=11 --mem-per-cpu=6000M --time=02:00:00'
 
 # ---- Job submission ----
 alias sbatch-run='sbatch job.slurm'
@@ -92,9 +108,9 @@ gpu_join() {
 		return 1
 	fi
 	hn=$(hostname -s 2>/dev/null || hostname)
-	if [[ -z "${GPU_JOIN_ANYWHERE:-}" ]] && [[ "$hn" =~ ^(c[0-9]+|l[0-9]+|h[0-9]+|n[0-9]+|cpu[0-9]+)$ ]]; then
-		echo "gpu_join: run from dsailogin (login), not from plain ssh to compute node '$hn'." >&2
-		echo "  Exit ssh, connect to dsailogin, then:  gpu_join $jid" >&2
+	if [[ -z "${GPU_JOIN_ANYWHERE:-}" ]] && [[ "$hn" =~ $DSAI_COMPUTE_HOST_RE ]]; then
+		echo "gpu_join: run from the login node, not from plain ssh to compute node '$hn'." >&2
+		echo "  Exit ssh, connect to the login node, then:  gpu_join $jid" >&2
 		echo "  (Override: GPU_JOIN_ANYWHERE=1 gpu_join $jid  — may still fail with execve on some sites.)" >&2
 		return 2
 	fi
@@ -175,9 +191,10 @@ gpu_join     From **dsailogin only** (refuses plain ssh c*/l*/h*/n*/cpu*). --pty
 
 cluster      Prints partition summary (sinfo -s) then GPU-style partition lines (includes GPU partitions).
 
-salloc-cpu   Request interactive CPU node: partition=cpu, 2 hours.
-srun-a100    Interactive GPU shell on a100 (srun --pty); 64G, 2h; clears stale SLURM_JOB_ID on login.
-srun-l40s    Same on l40s. srun-h100 / srun-nvl for other GPU partitions.
+salloc-cpu   Interactive CPU allocation: partition=$DSAI_CPU_PARTITION (med), 8 cores, ~31G, 2h.
+srun-cpu     Same but drops you straight into a shell (srun --pty).
+srun-a100    Interactive GPU shell on a100 (srun --pty); 1 GPU, 11 cores, ~64G, 2h; clears stale SLURM_JOB_ID on login.
+srun-l40s    Same on l40s. srun-h100 / srun-h200 for other GPU partitions.
 srun-l40s-try  Same as srun-l40s but --immediate=600 (exit if not started in 10 minutes).
 salloc-gpu-a100  GPU reservation only (salloc, no step); then gpu_join \$SLURM_JOB_ID or srun --jobid=\$SLURM_JOB_ID --overlap --pty /bin/bash -i
 salloc-gpu-l40s  Same for l40s.
@@ -230,7 +247,7 @@ _gpu_mem_gib_header() {
 gpu_free_nodes() {
 	local part any
 	_gpu_mem_gib_header
-	for part in a100 l40s h100 nvl; do
+	for part in $DSAI_GPU_PARTS_SP; do
 		printf '\n=== %s (state=idle, whole node free) ===\n' "$part"
 		any=0
 		while read -r node p st; do
@@ -249,7 +266,7 @@ gpu_open_nodes() {
 	local part any
 	_gpu_mem_gib_header
 	printf '%s\n' '(idle = empty node; mix* = partly used — Slurm may still place a GPU; not guaranteed.)'
-	for part in a100 l40s h100 nvl; do
+	for part in $DSAI_GPU_PARTS_SP; do
 		printf '\n=== %s (idle or mixed) ===\n' "$part"
 		any=0
 		while read -r node p st; do
@@ -298,13 +315,13 @@ gpu_nodes_cap() {
 		totg=$(awk -v m="$real" 'BEGIN { printf "%.1f", m / 1024 }')
 		jfg=$(awk -v m="$unbook" 'BEGIN { printf "%.1f", m / 1024 }')
 		printf '%-8s %-8s %-8s %5s %5s %5s %9s %9s\n' "$node" "$part" "$st" "$cfg_g" "$a_g" "$free" "$totg" "$jfg"
-	done < <(sinfo -N -p a100,l40s,h100,nvl -h -o '%N %P %t' 2>/dev/null | sort -u -k1,1 -k2,2)
+	done < <(sinfo -N -p "$DSAI_GPU_PARTITIONS" -h -o '%N %P %t' 2>/dev/null | sort -u -k1,1 -k2,2)
 }
 alias gpu-nodes-cap='gpu_nodes_cap'
 
 # squeue -o with tiny %b was truncating gres (e.g. gres/gpu:a100:10). Pipe-delimited + awk fixed widths.
 _gpu_queue_fmt_run() {
-	squeue -t R -p a100,l40s,h100,nvl -h -o '%u|%i|%t|%P|%b|%M|%l|%D|%N' 2>/dev/null | awk -F'|' '
+	squeue -t R -p "$DSAI_GPU_PARTITIONS" -h -o '%u|%i|%t|%P|%b|%M|%l|%D|%N' 2>/dev/null | awk -F'|' '
 	function rule() {
 		for (r = 0; r < 136; r++) printf "-"
 		printf "\n"
@@ -322,7 +339,7 @@ _gpu_queue_fmt_run() {
 	}'
 }
 _gpu_queue_fmt_pd() {
-	squeue -t PD -p a100,l40s,h100,nvl -h -o '%u|%i|%t|%P|%b|%M|%l|%D|%R' 2>/dev/null | awk -F'|' '
+	squeue -t PD -p "$DSAI_GPU_PARTITIONS" -h -o '%u|%i|%t|%P|%b|%M|%l|%D|%R' 2>/dev/null | awk -F'|' '
 	function rule() {
 		for (r = 0; r < 136; r++) printf "-"
 		printf "\n"
@@ -341,7 +358,7 @@ _gpu_queue_fmt_pd() {
 }
 
 gpu_queue_report() {
-	printf '\n%s\n' '=== RUNNING (GPU partitions a100,l40s,h100,nvl) ==='
+	printf '\n%s\n' "=== RUNNING (GPU partitions $DSAI_GPU_PARTITIONS) ==="
 	_gpu_queue_fmt_run | head -350
 	printf '\n%s\n' '=== PENDING (same partitions) ==='
 	_gpu_queue_fmt_pd | head -500
@@ -371,7 +388,7 @@ gpu_users_gres_report() {
 		else
 			rna[$u]=$((${rna[$u]:-0} + 1))
 		fi
-	done < <(squeue -t R -p a100,l40s,h100,nvl -h -o '%u %b' 2>/dev/null)
+	done < <(squeue -t R -p "$DSAI_GPU_PARTITIONS" -h -o '%u %b' 2>/dev/null)
 	while read -r u b; do
 		[[ -z "${u:-}" ]] && continue
 		n=$(_gpu_parse_job_gres "${b:-N/A}")
@@ -380,7 +397,7 @@ gpu_users_gres_report() {
 		else
 			pna[$u]=$((${pna[$u]:-0} + 1))
 		fi
-	done < <(squeue -t PD -p a100,l40s,h100,nvl -h -o '%u %b' 2>/dev/null)
+	done < <(squeue -t PD -p "$DSAI_GPU_PARTITIONS" -h -o '%u %b' 2>/dev/null)
 	printf '\n%s\n' '=== SUM gres/gpu (from squeue %b; N/A not counted) ==='
 	printf '%-12s %10s %10s %10s %10s\n' USER RUN_GRES PD_GRES RUN_NA PD_NA
 	for u in $(printf '%s\n' "${!rsum[@]}" "${!psum[@]}" "${!rna[@]}" "${!pna[@]}" | sort -u); do

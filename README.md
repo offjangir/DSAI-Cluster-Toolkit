@@ -1,6 +1,6 @@
 # DSAI Slurm toolkit
 
-Bash aliases, functions, and Python helpers for **Slurm + GPU** workflows on **JHU-style DSAI** login nodes (partitions such as `a100`, `l40s`, `h100`, `nvl`, `cpu`). The defaults match **dsailogin**-style naming; adjust partition lists if your site differs.
+Bash aliases, functions, and Python helpers for **Slurm + GPU** workflows on **JHU-style DSAI** login nodes. Defaults target partitions `med`, `a100`, `l40s`, `h100`, `h200`, `b200`, `b300`; every site-specific name is a shell variable (see [Environment](#environment)), so adjust there rather than editing functions.
 
 ## Contents
 
@@ -19,8 +19,8 @@ The three Python scripts expect to live in the **same directory** on `PATH` (the
 1. **Clone** (or copy) this repository to the machine where you use Slurm (e.g. under your home directory).
 
    ```bash
-   git clone <your-remote-url> ~/dsai-slurm-toolkit
-   cd ~/dsai-slurm-toolkit
+   git clone https://github.com/offjangir/DSAI-Cluster-Toolkit.git ~/DSAI-Cluster-Toolkit
+   cd ~/DSAI-Cluster-Toolkit
    ```
 
 2. **Put scripts on `PATH`** (pick one):
@@ -36,11 +36,19 @@ The three Python scripts expect to live in the **same directory** on `PATH` (the
    [[ ":$PATH:" != *":$HOME/bin:"* ]] && PATH="$HOME/bin:$PATH"
    ```
 
-3. **Load the shell toolkit** from `~/.bashrc` (one line; edit the path if you cloned elsewhere):
+3. **Load the shell toolkit.** On RHEL-family images whose stock `~/.bashrc` already sources
+   `~/.bashrc.d/*`, drop a stub there and leave `~/.bashrc` untouched:
 
    ```bash
-   [[ -f "$HOME/dsai-slurm-toolkit/shell/dsai-slurm-toolkit.bash" ]] && . "$HOME/dsai-slurm-toolkit/shell/dsai-slurm-toolkit.bash"
+   mkdir -p ~/.bashrc.d
+   cat > ~/.bashrc.d/dsai-slurm-toolkit.sh <<'EOF'
+   DSAI_TOOLKIT_DIR="$HOME/DSAI-Cluster-Toolkit"
+   [[ -f "$DSAI_TOOLKIT_DIR/shell/dsai-slurm-toolkit.bash" ]] && . "$DSAI_TOOLKIT_DIR/shell/dsai-slurm-toolkit.bash"
+   EOF
    ```
+
+   Sourcing from the checkout means `git pull` updates your shell. If your `~/.bashrc` has no
+   `~/.bashrc.d` loop, put that same one-liner directly in `~/.bashrc` instead.
 
    Alternatively, copy the contents of `shell/dsai-slurm-toolkit.bash` between the `# DSAI SLURM SHORTCUT TOOLKIT` markers in your `~/.bashrc` and keep the Python scripts on `PATH` as above.
 
@@ -60,20 +68,39 @@ The three Python scripts expect to live in the **same directory** on `PATH` (the
 
 ## Environment
 
-- **`DSAI_GPU_PARTITIONS`** — comma-separated Slurm partitions for the Python tools and for mental consistency with the bash helpers (default in scripts: `a100,l40s,h100,nvl`). Example:
+All three are set at the top of `shell/dsai-slurm-toolkit.bash` and honour a pre-existing
+value, so you can override them in `~/.bashrc` *before* sourcing the toolkit.
+
+- **`DSAI_GPU_PARTITIONS`** — comma-separated GPU partitions used by both the Python tools
+  and the bash report functions (`gpu-free`, `gpu-open`, `gpu-nodes-cap`, `gpu-queue`,
+  `gpu-users-gres`). Default: `a100,l40s,h100,h200,b200,b300`.
 
   ```bash
-  export DSAI_GPU_PARTITIONS=a100,l40s,h100,nvl
+  export DSAI_GPU_PARTITIONS=a100,l40s,h100,h200,b200,b300
   ```
 
-- Bash helpers hard-code partition names in several places; if your cluster renames partitions, update **`shell/dsai-slurm-toolkit.bash`** (search for `a100`, `l40s`, etc.).
+- **`DSAI_CPU_PARTITION`** — CPU-only partition for `salloc-cpu` / `srun-cpu`. Default: `med`.
+
+- **`DSAI_COMPUTE_HOST_RE`** — regex identifying compute nodes, so `gpu_join` can refuse to
+  run from a plain `ssh` session. Default: `^(csr|ga|gb|gh|gl)[0-9]+$`.
+
+### Memory is welded to core count
+
+Every partition on this cluster sets `DefMemPerCPU == MaxMemPerCPU`, so `--mem=64G` does not
+cap memory — it silently inflates your **core** request until the ratio fits. The interactive
+aliases therefore use explicit `--mem-per-cpu` at or under each cap:
+
+| Partition | Max MB/core | Node shape |
+|---|---|---|
+| `med` | 4000 | 112 cores (108 usable), ~515 GB, no GPUs |
+| `a100`, `l40s` | 6000 | 96 / 128 cores, 8 GPUs |
+| `h100`, `h200`, `b200`, `b300` | 12000 | 128 cores, 8 GPUs |
 
 ## Matching physical GPUs
 
 Run **`gpu_whereami`** in two contexts (e.g. plain `ssh` to the node and inside `srun` / `gpu_join`) and compare the **`pci.bus_id`** column. Same bus id is the same physical card. See **`docs/TOOLKIT.md`**.
 
 
-If you created the repo locally with `git init` only, add `origin` as above, then `git push`.
 
 ## License
 
