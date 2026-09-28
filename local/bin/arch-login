@@ -22,8 +22,8 @@ Usage:
   arch-login --auto-enter 20 # hit ENTER automatically 20s after browser opens
   arch-login <sshhost>       # target a different Host alias (default: arch)
 
-Holding the login open:
-  arch-login --hours 48 skipjack      # one MFA tap buys 48 idle hours
+Holding the login open:            # default is 72h (3 days)
+  arch-login --hours 168 skipjack     # one MFA tap buys a whole week
   arch-login --reset --hours 8 arch   # re-lock an existing master to 8h
   ARCH_LOGIN_HOURS=24 arch-login      # same, via the environment
 
@@ -49,9 +49,10 @@ import tty
 DEFAULT_HOST = "arch"
 
 # Idle lifetime of the master, in hours. One MFA tap buys you this much
-# prompt-free access. Override per-run with --hours, or globally by exporting
-# ARCH_LOGIN_HOURS. Fractions are fine (--hours 0.5).
-DEFAULT_HOURS = float(os.environ.get("ARCH_LOGIN_HOURS", "12"))
+# prompt-free access. Three days covers a weekend without re-authenticating.
+# Override per-run with --hours, or globally by exporting ARCH_LOGIN_HOURS.
+# Fractions are fine (--hours 0.5).
+DEFAULT_HOURS = float(os.environ.get("ARCH_LOGIN_HOURS", "72"))
 
 CODE_RE = re.compile(rb"user_code=([A-Za-z0-9][A-Za-z0-9-]{3,})")
 BARE_CODE_RE = re.compile(rb"Code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})")

@@ -44,7 +44,7 @@ Host skipjack skipjack1 skipjack2 skipjack3 skipjack4 skipjack5
   ControlPath ~/.ssh/sockets/%r@%h-%p
   # Fallback idle lifetime for a master created by a bare `ssh`. When you go in
   # through `arch-login --hours N`, its -o ControlPersist overrides this.
-  ControlPersist 12h
+  ControlPersist 72h
   ServerAliveInterval 30
   ServerAliveCountMax 6
   TCPKeepAlive yes

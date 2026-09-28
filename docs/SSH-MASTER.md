@@ -39,15 +39,17 @@ overwrites `PATH` wholesale rather than appending.
 ## Holding the login open for N hours
 
 ```bash
-arch-login --hours 48 skipjack       # one tap buys 48 hours
+arch-login skipjack                  # the default: 72 hours (3 days)
+arch-login --hours 168 skipjack      # or a whole week
 ```
 
 `--hours` sets `ControlPersist` on the master it creates. Accepts fractions
-(`--hours 0.5`), caps at 720 (30 days), and defaults to 12 — override the
-default globally by exporting `ARCH_LOGIN_HOURS`.
+(`--hours 0.5`), caps at 720 (30 days), and **defaults to 72** — three days, so
+a Friday login is still good on Monday. Override the default globally by
+exporting `ARCH_LOGIN_HOURS`.
 
 ```bash
-export ARCH_LOGIN_HOURS=24           # in ~/.zshrc
+export ARCH_LOGIN_HOURS=168          # in ~/.zshrc
 ```
 
 **It's an idle timeout, not a wall clock.** The window is a *floor*: the
@@ -61,7 +63,7 @@ or VPN change.
 ```
 $ arch-login --status skipjack
 Master running (pid=47160)
-[arch-login] locked for 48h; idle until 09:12 on Wed 30 Sep (41.3h left)
+[arch-login] locked for 72h; idle until 09:12 on Wed 30 Sep (65.3h left)
 ```
 
 ### Re-locking a master that's already up
@@ -93,8 +95,8 @@ everything still works, you just lose the countdown in `--status`. `--stop` and
 
 | Want | Run |
 |---|---|
-| Log in, default window | `arch-login skipjack` |
-| Log in for 48 hours | `arch-login --hours 48 skipjack` |
+| Log in, default window (72h) | `arch-login skipjack` |
+| Log in for a week | `arch-login --hours 168 skipjack` |
 | Am I logged in? How long left? | `arch-login --status skipjack` |
 | Re-lock to a new window | `arch-login --reset --hours 8 skipjack` |
 | Un-wedge a hung master | `arch-login --reset skipjack` |

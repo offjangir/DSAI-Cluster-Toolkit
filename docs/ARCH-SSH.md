@@ -58,7 +58,7 @@ What *can* be removed is everything around it:
 | Open a compute node | `arch-code --host arch-c001 /scratch4/yjangir1` |
 | Just a shell | `ssh arch` |
 | Log in / refresh the master | `arch-login` |
-| Log in for 48 hours | `arch-login --hours 48` |
+| Log in for a week | `arch-login --hours 168` |
 | Am I logged in? | `arch-login --status` |
 | Log out | `arch-login --stop` |
 
@@ -70,7 +70,7 @@ whenever anything uses the connection, so with Cursor connected it persists
 indefinitely. It realistically only drops after the full window away from ARCH,
 or on reboot / VPN change.
 
-The window defaults to 12h and is set per-login with `arch-login --hours N`
+The window defaults to 72h (3 days) and is set per-login with `arch-login --hours N`
 (or globally with `ARCH_LOGIN_HOURS`). Because `ControlPersist` is fixed when
 the master is created, changing it on a live master means re-locking it:
 `arch-login --reset --hours 48`. See
@@ -108,7 +108,7 @@ Host arch
   User yjangir1
   ControlMaster auto
   ControlPath ~/.ssh/sockets/%r@%h-%p
-  ControlPersist 12h
+  ControlPersist 72h
   ServerAliveInterval 60
   ServerAliveCountMax 3
   TCPKeepAlive yes
