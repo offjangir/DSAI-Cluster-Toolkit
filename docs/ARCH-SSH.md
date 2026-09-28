@@ -7,6 +7,11 @@ Tooling to make `login.arch.jhu.edu` usable without doing the OIDC device-code
 > not on the cluster. It is the counterpart to the rest of this repo, which runs
 > on the login node. Paths like `~/.local/bin` and `~/.zshrc` refer to your Mac.
 
+> **Skipjack users:** see **[`SSH-MASTER.md`](SSH-MASTER.md)** instead. Same
+> tooling, aimed at the Skipjack login nodes, and it documents the `--hours`
+> flag that sets how long one MFA tap lasts. This page stays focused on
+> `login.arch.jhu.edu` and the Cursor shim.
+
 **TL;DR — the whole workflow is one command:**
 
 ```bash
@@ -53,16 +58,23 @@ What *can* be removed is everything around it:
 | Open a compute node | `arch-code --host arch-c001 /scratch4/yjangir1` |
 | Just a shell | `ssh arch` |
 | Log in / refresh the master | `arch-login` |
+| Log in for 48 hours | `arch-login --hours 48` |
 | Am I logged in? | `arch-login --status` |
 | Log out | `arch-login --stop` |
 
 `arch-login` is a no-op when a master is already alive, and `arch-code` calls
 it for you — so `arch-code` alone is a complete workflow.
 
-**Expiry:** `ControlPersist 12h` is an *idle* timeout, not a hard clock. It
-resets whenever anything uses the connection, so with Cursor connected it
-persists indefinitely. It realistically only drops after 12h away from ARCH,
+**Expiry:** `ControlPersist` is an *idle* timeout, not a hard clock. It resets
+whenever anything uses the connection, so with Cursor connected it persists
+indefinitely. It realistically only drops after the full window away from ARCH,
 or on reboot / VPN change.
+
+The window defaults to 12h and is set per-login with `arch-login --hours N`
+(or globally with `ARCH_LOGIN_HOURS`). Because `ControlPersist` is fixed when
+the master is created, changing it on a live master means re-locking it:
+`arch-login --reset --hours 48`. See
+**[`SSH-MASTER.md`](SSH-MASTER.md#holding-the-login-open-for-n-hours)**.
 
 Copying files needs no extra login:
 

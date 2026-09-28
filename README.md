@@ -3,8 +3,9 @@
 Bash aliases, functions, and Python helpers for **Slurm + GPU** workflows on **Skipjack**, the JHU ARCH DSAI cluster (login node `login01`, reached as `dsailogin.arch.jhu.edu`). Defaults target partitions `med`, `a100`, `l40s`, `h100`, `h200`, `b200`, `b300`; every site-specific name is a shell variable (see [Environment](#environment)), so adjust there rather than editing functions.
 
 Getting *onto* the cluster in the first place is a separate problem — see
-**[`docs/ARCH-SSH.md`](docs/ARCH-SSH.md)** for authenticating once per day instead of
-once per connection.
+**[`docs/SSH-MASTER.md`](docs/SSH-MASTER.md)** for authenticating once and holding the
+login open for as many hours as you ask for, instead of doing the MFA dance on every
+connection.
 
 ## Contents
 
@@ -15,7 +16,10 @@ once per connection.
 | [`scripts/skipjack_gpu_allocations.py`](scripts/skipjack_gpu_allocations.py) | Babel-style GPU totals / running / pending / free (`--nodes`, `--json`, …). |
 | [`scripts/skipjack_gpu_counter.py`](scripts/skipjack_gpu_counter.py) | Per-model GPU inventory counts. |
 | [`docs/TOOLKIT.md`](docs/TOOLKIT.md) | Longer documentation (design notes, tables, troubleshooting). |
-| [`docs/ARCH-SSH.md`](docs/ARCH-SSH.md) | **Local machine:** one-login SSH to `login.arch.jhu.edu` via `ControlMaster`, plus the Cursor/VS Code remote setup. |
+| [`local/bin/arch-login`](local/bin/arch-login) | **Local machine:** drives the OIDC device-code login and holds the SSH master open for `--hours N`. |
+| [`local/ssh/skipjack.sshconfig`](local/ssh/skipjack.sshconfig) | **Local machine:** `~/.ssh/config` block — login-node aliases `skipjack1`…`skipjack5`, compute-node jumps. |
+| [`docs/SSH-MASTER.md`](docs/SSH-MASTER.md) | **Local machine:** how the master works, the `--hours` lock, picking a login node, compute hops, troubleshooting. |
+| [`docs/ARCH-SSH.md`](docs/ARCH-SSH.md) | **Local machine:** the same machinery aimed at `login.arch.jhu.edu`, plus the Cursor/VS Code remote setup. |
 
 The three Python scripts expect to live in the **same directory** on `PATH` (they import each other).
 

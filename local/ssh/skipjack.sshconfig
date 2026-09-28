@@ -1,0 +1,90 @@
+# ---------------------------------------------------------------------------
+# Skipjack SSH aliases  --  append to ~/.ssh/config on your LOCAL machine.
+#
+#   cat local/ssh/skipjack.sshconfig >> ~/.ssh/config
+#   sed -i '' 's/yjangir1/<your-jhu-id>/g' ~/.ssh/config
+#
+# Then authenticate once:   arch-login --hours 12 skipjack
+# See docs/SSH-MASTER.md for the full story.
+# ---------------------------------------------------------------------------
+
+# --- Login nodes -----------------------------------------------------------
+#
+# `skipjack.jhu.edu` is a plain A record for 162.129.223.38, which *is*
+# login05. There is no round-robin and no load balancer, so that hostname
+# lands you on node 5 every single time. Use the numbered aliases instead.
+#
+#   skipjack1  login01.arch.jhu.edu  162.129.223.39
+#   skipjack2  login02.arch.jhu.edu  162.129.223.40
+#   skipjack3  login03.arch.jhu.edu  162.129.223.41
+#   skipjack4  login04.arch.jhu.edu  162.129.223.42
+#   skipjack5  login05.arch.jhu.edu  162.129.223.38   (= skipjack.jhu.edu)
+#
+# Each node keeps its own master socket (ControlPath is keyed on the resolved
+# hostname), so each one you use needs its own one-time `arch-login`.
+
+Host skipjack1
+  HostName login01.arch.jhu.edu
+Host skipjack2
+  HostName login02.arch.jhu.edu
+Host skipjack3
+  HostName login03.arch.jhu.edu
+Host skipjack4
+  HostName login04.arch.jhu.edu
+Host skipjack5
+  HostName login05.arch.jhu.edu
+
+# Default node for a bare `ssh skipjack`. Change this one line to move.
+Host skipjack
+  HostName login01.arch.jhu.edu
+
+Host skipjack skipjack1 skipjack2 skipjack3 skipjack4 skipjack5
+  User yjangir1
+  ControlMaster auto
+  ControlPath ~/.ssh/sockets/%r@%h-%p
+  # Fallback idle lifetime for a master created by a bare `ssh`. When you go in
+  # through `arch-login --hours N`, its -o ControlPersist overrides this.
+  ControlPersist 12h
+  ServerAliveInterval 30
+  ServerAliveCountMax 6
+  TCPKeepAlive yes
+  ForwardAgent yes
+
+# --- Compute nodes ---------------------------------------------------------
+#
+# Not publicly routable; reached by tunnelling through whichever login node
+# `skipjack` points at. No second authentication once the master is up.
+#
+#   interactive  csr[048-052]     med    csr[053-127]
+#   a100_mig     ga[129-130]      a100   ga[131-143]
+#   b200         gb[201-216]      b300   gb301
+#   h100         gh[101-132]      h200   gh[201-206]
+#   l40s         gl[105-112]      rtx6000 gr[101-103]
+#
+# `sj-<node>` always works and never collides with anything:  ssh sj-gh101
+Host sj-*
+  User yjangir1
+  ProxyCommand sh -c 'exec ssh skipjack -W "${1#sj-}:$2"' -- %h %p
+  ForwardAgent yes
+  ServerAliveInterval 30
+  ServerAliveCountMax 6
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+  LogLevel ERROR
+
+# Bare node names, for the prefixes nothing else in your config claims.
+#
+# NOTE: `gh*` and `gr*` are deliberately absent. If you also use NCSA Delta
+# its GH200 nodes are gh151/gh152, and a host like gretel.ri.cmu.edu matches
+# `gr*` -- first match wins in ssh_config, so a bare `ssh gh101` would sail
+# off to the wrong cluster. Use `ssh sj-gh101` / `ssh sj-gr101` for those.
+Host csr* ga* gb* gl*
+  HostName %h
+  User yjangir1
+  ProxyJump skipjack
+  ForwardAgent yes
+  ServerAliveInterval 30
+  ServerAliveCountMax 6
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+  LogLevel ERROR

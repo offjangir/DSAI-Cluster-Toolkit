@@ -1,0 +1,407 @@
+#!/usr/bin/env python3
+"""
+arch-login - drive the ARCH (JHU) OIDC device-code SSH login and leave a
+persistent ControlMaster behind, so every later ssh/scp/rsync/VS Code
+connection is instant and prompt-free.
+
+What it automates:
+  - detects the device URL + user code as ssh prints them
+  - opens the pre-filled approval URL in your browser
+  - copies the code to the clipboard (belt and braces)
+  - fires a macOS notification so you notice it on another desktop
+  - optionally presses ENTER for you after you've approved
+
+What it does NOT automate: the Entra MFA approval itself. That's the one
+human step, by design.
+
+Usage:
+  arch-login                 # log in if needed, else no-op
+  arch-login --status        # is the master socket alive? how long is left?
+  arch-login --stop          # tear the master down
+  arch-login --reset         # force-kill a wedged master, then log in fresh
+  arch-login --auto-enter 20 # hit ENTER automatically 20s after browser opens
+  arch-login <sshhost>       # target a different Host alias (default: arch)
+
+Holding the login open:
+  arch-login --hours 48 skipjack      # one MFA tap buys 48 idle hours
+  arch-login --reset --hours 8 arch   # re-lock an existing master to 8h
+  ARCH_LOGIN_HOURS=24 arch-login      # same, via the environment
+
+  --hours sets ControlPersist on the master, which is an IDLE timeout: the
+  connection survives at least that long with nothing using it, and longer
+  if you keep using it. It only applies to a master being created, so pair
+  it with --reset (or --force) to re-lock one that is already up.
+"""
+
+import argparse
+import json
+import os
+import pty
+import re
+import select
+import shutil
+import subprocess
+import sys
+import termios
+import time
+import tty
+
+DEFAULT_HOST = "arch"
+
+# Idle lifetime of the master, in hours. One MFA tap buys you this much
+# prompt-free access. Override per-run with --hours, or globally by exporting
+# ARCH_LOGIN_HOURS. Fractions are fine (--hours 0.5).
+DEFAULT_HOURS = float(os.environ.get("ARCH_LOGIN_HOURS", "12"))
+
+CODE_RE = re.compile(rb"user_code=([A-Za-z0-9][A-Za-z0-9-]{3,})")
+BARE_CODE_RE = re.compile(rb"Code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})")
+URL_RE = re.compile(rb"(https://[^\s\x1b]+)")
+
+
+def ssh_ctl(host, cmd, timeout=6):
+    """Run `ssh -O <cmd>`; return (rc, combined output). Times out on wedged sockets."""
+    try:
+        p = subprocess.run(
+            ["ssh", "-O", cmd, host],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return p.returncode, (p.stdout + p.stderr).strip()
+    except subprocess.TimeoutExpired:
+        return 124, f"ssh -O {cmd} {host} timed out"
+
+
+def master_alive(host):
+    return ssh_ctl(host, "check")[0] == 0
+
+
+def control_path(host):
+    """Resolve the effective ControlPath for `host` (%r/%h/%p expanded)."""
+    try:
+        p = subprocess.run(["ssh", "-G", host], capture_output=True, text=True, timeout=5)
+    except subprocess.TimeoutExpired:
+        return None
+    if p.returncode != 0:
+        return None
+    for line in p.stdout.splitlines():
+        if line.startswith("controlpath "):
+            path = line.split(None, 1)[1].strip()
+            if path and path.lower() != "none":
+                return os.path.expanduser(path)
+    return None
+
+
+def meta_path(host):
+    """Sidecar file recording how long this master was locked open for."""
+    path = control_path(host)
+    return path + ".meta" if path else None
+
+
+def write_meta(host, hours):
+    path = meta_path(host)
+    if not path:
+        return
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as fh:
+            json.dump({"hours": hours, "established": time.time()}, fh)
+    except OSError:
+        pass  # purely informational; never fail a login over it
+
+
+def read_meta(host):
+    path = meta_path(host)
+    if not path:
+        return None
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def clear_meta(host):
+    path = meta_path(host)
+    if path:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def describe_window(host):
+    """Human summary of the lock window, or None if we never recorded one."""
+    meta = read_meta(host)
+    if not meta:
+        return None
+    hours = meta.get("hours")
+    started = meta.get("established")
+    if not hours or not started:
+        return None
+    deadline = started + hours * 3600
+    left = deadline - time.time()
+    stamp = time.strftime("%H:%M on %a %d %b", time.localtime(deadline))
+    if left <= 0:
+        return f"locked for {hours:g}h; idle window elapsed at {stamp} (use is still refreshing it)"
+    return f"locked for {hours:g}h; idle until {stamp} ({left / 3600:.1f}h left)"
+
+
+def reset_master(host):
+    """
+    Tear down a wedged master: ask ssh to exit (bounded), then unlink the
+    socket if anything is still there. Returns a status string for logging.
+    """
+    steps = []
+    rc, out = ssh_ctl(host, "exit", timeout=5)
+    if rc == 0:
+        steps.append("ssh -O exit ok")
+    elif rc == 124:
+        steps.append("ssh -O exit hung (ignored)")
+    else:
+        steps.append(f"ssh -O exit rc={rc}")
+
+    path = control_path(host)
+    if path and os.path.exists(path):
+        try:
+            os.unlink(path)
+            steps.append(f"unlinked {path}")
+        except OSError as exc:
+            steps.append(f"unlink failed: {exc}")
+    elif path:
+        steps.append("socket already gone")
+
+    clear_meta(host)
+    return "; ".join(steps)
+
+
+def notify(title, message):
+    if not shutil.which("osascript"):
+        return
+    subprocess.run(
+        ["osascript", "-e",
+         f'display notification {message!r} with title {title!r} sound name "Ping"'],
+        capture_output=True,
+    )
+
+
+def copy_clipboard(text):
+    if not shutil.which("pbcopy"):
+        return False
+    try:
+        subprocess.run(["pbcopy"], input=text.encode(), check=True)
+        return True
+    except Exception:
+        return False
+
+
+def open_browser(url):
+    if not shutil.which("open"):
+        return False
+    subprocess.run(["open", url], capture_output=True)
+    return True
+
+
+def banner(msg):
+    """Write a status line that survives raw terminal mode."""
+    sys.stdout.write("\r\n" + msg + "\r\n")
+    sys.stdout.flush()
+
+
+def authenticate(host, auto_enter, open_url=True, hours=None):
+    """
+    Spawn `ssh <host> true` on a pty. ssh authenticates, backgrounds a
+    persistent master (ControlPersist, below), runs `true`, and exits.
+    The master outlives us by `hours`.
+    """
+    hours = DEFAULT_HOURS if hours is None else hours
+    # ControlPersist takes a bare integer as seconds, which sidesteps having to
+    # format fractional hours into ssh's "12h"/"30m" time spec. A command-line
+    # -o beats whatever ControlPersist the ssh_config sets for this host.
+    argv = [
+        "ssh",
+        "-o", "ControlMaster=auto",
+        "-o", f"ControlPersist={int(hours * 3600)}",
+        host,
+        "true",
+    ]
+
+    pid, fd = pty.fork()
+    if pid == 0:  # child
+        os.execvp(argv[0], argv)
+        os._exit(127)
+
+    # Mirror our window size onto the child pty so ssh's prompt wraps sanely.
+    try:
+        import fcntl
+        import struct
+        sz = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b"\0" * 8)
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, sz)
+    except Exception:
+        pass
+
+    stdin_tty = sys.stdin.isatty()
+    old_attrs = None
+    if stdin_tty:
+        old_attrs = termios.tcgetattr(sys.stdin)
+        tty.setraw(sys.stdin.fileno())
+
+    buf = b""
+    handled = False
+    enter_deadline = None
+
+    try:
+        while True:
+            timeout = None
+            if enter_deadline is not None:
+                timeout = max(0.0, enter_deadline - time.monotonic())
+
+            watch = [fd] + ([sys.stdin] if stdin_tty else [])
+            try:
+                ready, _, _ = select.select(watch, [], [], timeout)
+            except (OSError, select.error):
+                break
+
+            if enter_deadline is not None and time.monotonic() >= enter_deadline:
+                banner("[arch-login] auto-pressing ENTER")
+                os.write(fd, b"\n")
+                enter_deadline = None
+
+            if sys.stdin in ready:
+                data = os.read(sys.stdin.fileno(), 1024)
+                if data:
+                    os.write(fd, data)
+                    enter_deadline = None  # you took over; stop the timer
+
+            if fd in ready:
+                try:
+                    data = os.read(fd, 4096)
+                except OSError:
+                    break
+                if not data:
+                    break
+
+                os.write(sys.stdout.fileno(), data)
+                buf += data
+                buf = buf[-8192:]
+
+                if not handled:
+                    m = CODE_RE.search(buf)
+                    code = m.group(1).decode() if m else None
+                    if code is None:
+                        m2 = BARE_CODE_RE.search(buf)
+                        code = m2.group(1).decode() if m2 else None
+
+                    if code:
+                        handled = True
+                        urls = [u.decode().rstrip(".,)") for u in URL_RE.findall(buf)]
+                        url = next(
+                            (u for u in urls if "device" in u or "user_code" in u),
+                            urls[0] if urls else None,
+                        )
+
+                        bits = []
+                        if copy_clipboard(code):
+                            bits.append("code copied to clipboard")
+                        if url and open_url and open_browser(url):
+                            bits.append("browser opened")
+                        banner(f"[arch-login] {code} - " + ", ".join(bits or ["approve manually"]))
+                        notify("ARCH login", f"Approve {code} in your browser")
+
+                        if auto_enter:
+                            banner(f"[arch-login] will press ENTER in {auto_enter}s "
+                                   f"(type anything to take over)")
+                            enter_deadline = time.monotonic() + auto_enter
+    finally:
+        if old_attrs is not None:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_attrs)
+
+    _, status = os.waitpid(pid, 0)
+    return os.waitstatus_to_exitcode(status)
+
+
+def positive_hours(raw):
+    try:
+        value = float(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{raw!r} is not a number of hours")
+    if value <= 0:
+        raise argparse.ArgumentTypeError("hours must be greater than 0")
+    if value > 24 * 30:
+        raise argparse.ArgumentTypeError("hours must be 720 (30 days) or less")
+    return value
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Authenticate once and hold a persistent SSH master open for N hours."
+    )
+    ap.add_argument("host", nargs="?", default=DEFAULT_HOST,
+                    help=f"ssh Host alias (default: {DEFAULT_HOST})")
+    ap.add_argument("--status", action="store_true", help="report master state and exit")
+    ap.add_argument("--stop", action="store_true", help="tear down the master and exit")
+    ap.add_argument("--reset", action="store_true",
+                    help="force-kill a wedged master (removes the socket) and re-authenticate")
+    ap.add_argument("--force", action="store_true", help="re-auth even if a master is alive")
+    ap.add_argument("--no-browser", action="store_true", help="don't open the browser")
+    ap.add_argument("--auto-enter", type=int, metavar="SECS", default=0,
+                    help="press ENTER automatically N seconds after the browser opens")
+    ap.add_argument("--hours", type=positive_hours, metavar="N", default=None,
+                    help=f"hold the login open for N idle hours (default: {DEFAULT_HOURS:g}, "
+                         f"or $ARCH_LOGIN_HOURS). Applies to a master being created, so "
+                         f"combine with --reset to re-lock a live one.")
+    args = ap.parse_args()
+
+    if args.status:
+        rc, out = ssh_ctl(args.host, "check")
+        print(out or ("alive" if rc == 0 else "no master"))
+        if rc == 0:
+            window = describe_window(args.host)
+            print(f"[arch-login] {window}" if window
+                  else "[arch-login] lock window unknown (master predates --hours)")
+        return rc
+
+    if args.stop:
+        rc, out = ssh_ctl(args.host, "exit")
+        clear_meta(args.host)
+        print(out or ("stopped" if rc == 0 else "nothing to stop"))
+        return 0
+
+    if args.reset:
+        print(f"[arch-login] resetting '{args.host}': {reset_master(args.host)}")
+        # Fall through to a fresh login.
+
+    if not args.force and not args.reset and master_alive(args.host):
+        print(f"[arch-login] master already alive for '{args.host}' - nothing to do")
+        window = describe_window(args.host)
+        if window:
+            print(f"[arch-login] {window}")
+        if args.hours is not None:
+            # ControlPersist is fixed when the master is created; there is no
+            # way to retune a running one. Say so rather than silently ignoring.
+            print(f"[arch-login] note: --hours {args.hours:g} not applied to the live "
+                  f"master. Re-lock it with: arch-login --reset --hours {args.hours:g} "
+                  f"{args.host}")
+        return 0
+
+    hours = DEFAULT_HOURS if args.hours is None else args.hours
+    rc = authenticate(args.host, args.auto_enter,
+                      open_url=not args.no_browser, hours=hours)
+
+    if master_alive(args.host):
+        write_meta(args.host, hours)
+        print(f"\n[arch-login] master up. `ssh {args.host}` is now instant.")
+        window = describe_window(args.host)
+        if window:
+            print(f"[arch-login] {window}")
+        return 0
+
+    print(f"\n[arch-login] no master after login attempt (ssh exit {rc}).", file=sys.stderr)
+    return rc or 1
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)
